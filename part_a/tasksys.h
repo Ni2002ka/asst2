@@ -2,6 +2,24 @@
 #define _TASKSYS_H
 
 #include "itasksys.h"
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <condition_variable>
+#include <queue>
+
+typedef struct {
+  IRunnable* runnable;
+  int thread_ID;
+  int tasks_start_id, tasks_end_id, total_tasks;
+} runThreadArgs;
+
+typedef struct {
+  IRunnable* runnable;
+  int next_task, completed_tasks, total_tasks;
+  std::atomic<bool> task_completed, recruit_workers;
+} Task;
+
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -27,6 +45,7 @@ class TaskSystemSerial: public ITaskSystem {
  */
 class TaskSystemParallelSpawn: public ITaskSystem {
     public:
+        int _num_threads;
         TaskSystemParallelSpawn(int num_threads);
         ~TaskSystemParallelSpawn();
         const char* name();
@@ -44,6 +63,13 @@ class TaskSystemParallelSpawn: public ITaskSystem {
  */
 class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
     public:
+        std::thread* _workers;
+        Task* current_task;
+        int _num_threads;
+        std::mutex* thread_lock;
+        std::atomic<bool> system_shutdown;
+        bool system_init;
+        void wait_for_work(int thread_ID);
         TaskSystemParallelThreadPoolSpinning(int num_threads);
         ~TaskSystemParallelThreadPoolSpinning();
         const char* name();
@@ -61,6 +87,14 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
  */
 class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
     public:
+        std::condition_variable cv_notif_threads;
+        std::thread* _workers;
+        Task* current_task;
+        int _num_threads;
+        std::mutex* thread_lock;
+        std::atomic<bool> system_shutdown;
+        bool system_init;
+        void wait_for_work(int thread_ID);
         TaskSystemParallelThreadPoolSleeping(int num_threads);
         ~TaskSystemParallelThreadPoolSleeping();
         const char* name();
