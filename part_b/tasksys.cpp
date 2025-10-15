@@ -179,8 +179,8 @@ void TaskSystemParallelThreadPoolSpinning::wait_for_work(int thread_ID) {
 
         current_task->runnable->runTask(task_ID, current_task->total_tasks);
         thread_lock->lock();
-        current_task->completed_tasks++;
-        if (current_task->completed_tasks >= current_task->total_tasks){
+        current_task->completed_tasks.fetch_add(1);
+        if (current_task->completed_tasks.load() >= current_task->total_tasks){
             current_task->task_completed.store(true);
         }
         thread_lock->unlock();
@@ -194,7 +194,7 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_tota
     current_task->runnable = runnable;
     current_task->total_tasks = num_total_tasks;
     current_task->next_task = 0;
-    current_task->completed_tasks = 0;
+    current_task->completed_tasks.store(0);
     current_task->task_completed.store(false);
     system_init = true;
     thread_lock->unlock();
@@ -316,16 +316,17 @@ void TaskSystemParallelThreadPoolSleeping::wait_for_work(int thread_ID) {
         notif_lock.unlock();
     
         current_task->runnable->runTask(task_ID, current_task->total_tasks);
-        thread_lock->lock();
+        // thread_lock->lock();
         // printf("Worker %d done\n", thread_ID);
-        current_task->completed_tasks++;
-        if (current_task->completed_tasks >= current_task->total_tasks){            
+        current_task->completed_tasks.fetch_add(1, std::memory_order_relaxed);
+        // current_task->completed_tasks++;
+        if (current_task->completed_tasks.load() >= current_task->total_tasks){            
             current_task->task_completed.store(true);
             // Since a new task has been completed, notify other threads to check
             // if new task is now available
             cv_notif_threads.notify_all();
         }
-        thread_lock->unlock();
+        // thread_lock->unlock();
     }
 
 }
@@ -344,7 +345,7 @@ TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnabl
     // printf("Called runAsyncWithDeps\n");
     Task* t = new Task;
     t->runnable = runnable;
-    t->completed_tasks = 0;
+    t->completed_tasks.store(0);
     t->next_task = 0;
     t->total_tasks = num_total_tasks;
     t->deps = deps;

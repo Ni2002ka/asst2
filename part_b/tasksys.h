@@ -18,7 +18,8 @@ typedef struct {
   IRunnable* runnable;
   TaskID ID;
   std::vector<TaskID> deps;
-  int next_task, completed_tasks, total_tasks;
+  int next_task, total_tasks;
+  std::atomic<int> completed_tasks;
   std::atomic<bool> task_completed, recruit_workers, task_started;
 } Task;
 
