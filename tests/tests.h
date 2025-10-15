@@ -58,59 +58,109 @@ typedef struct {
  * ==================================================================
 */
 /*
- * Implement your task here
+ * A 3-stage vector task:
+ * 1. multiply A by 2
+ * 2. take the sqrt
+ * 3. do sin(x) + cos(x)
 */
-class YourTask : public IRunnable {
-    public:
-        YourTask() {}
-        ~YourTask() {}
-        void runTask(int task_id, int num_total_tasks) {}
+class VectorStageTask : public IRunnable {
+public:
+    float* input_;
+    float* output_;
+    int num_elements_;
+    int stage_;  // 1 = multiply, 2 = sqrt, 3 = sin+cos
+
+    VectorStageTask(float* input, float* output, int num_elements, int stage)
+        : input_(input), output_(output), num_elements_(num_elements), stage_(stage) {}
+
+    void runTask(int task_id, int num_total_tasks) override {
+        int chunk = (num_elements_ + num_total_tasks - 1) / num_total_tasks;
+        int start = task_id * chunk;
+        int end = std::min(start + chunk, num_elements_);
+
+        for (int i = start; i < end; i++) {
+            if (stage_ == 1)
+                output_[i] = input_[i] * 2.0f;
+            else if (stage_ == 2)
+                output_[i] = std::sqrt(input_[i]);
+            else if (stage_ == 3)
+                output_[i] = std::sin(input_[i]) + std::cos(input_[i]);
+        }
+    }
 };
 /*
  * Implement your test here. Call this function from a wrapper that passes in
  * do_async and num_elements. See `simpleTest`, `simpleTestSync`, and
  * `simpleTestAsync` as an example.
  */
-TestResults yourTest(ITaskSystem* t, bool do_async, int num_elements, int num_bulk_task_launches) {
-    // TODO: initialize your input and output buffers
-    int* output = new int[num_elements];
+TestResults vectorPipelineDepsTest(ITaskSystem* t, bool do_async) {
+    int num_elements = 1 << 16;
+    int num_tasks = 16;
 
-    // TODO: instantiate your bulk task launches
+    // Buffers for pipeline
+    float* A = new float[num_elements];
+    float* B = new float[num_elements];
+    float* C = new float[num_elements];
+    float* D = new float[num_elements];
 
-    // Run the test
-    double start_time = CycleTimer::currentSeconds();
-    if (do_async) {
-        // TODO:
-        // initialize dependency vector
-        // make calls to t->runAsyncWithDeps and push TaskID to dependency vector
-        // t->sync() at end
-    } else {
-        // TODO: make calls to t->run
+    for (int i = 0; i < num_elements; i++) {
+        A[i] = (float)i / 100.0f;
+        B[i] = C[i] = D[i] = 0.0f;
     }
-    double end_time = CycleTimer::currentSeconds();
 
-    // Correctness validation
-    TestResults results;
-    results.passed = true;
+    VectorStageTask stage1(A, B, num_elements, 1);
+    VectorStageTask stage2(B, C, num_elements, 2);
+    VectorStageTask stage3(C, D, num_elements, 3);
 
-    for (int i=0; i<num_elements; i++) {
-        int value = 0; // TODO: initialize value
-        for (int j=0; j<num_bulk_task_launches; j++) {
-            // TODO: update value as expected
-        }
+    double start = CycleTimer::currentSeconds();
 
-        int expected = value;
-        if (output[i] != expected) {
-            results.passed = false;
-            printf("%d: %d expected=%d\n", i, output[i], expected);
+    if (do_async) {
+        std::vector<TaskID> deps1;
+        TaskID t1 = t->runAsyncWithDeps(&stage1, num_tasks, deps1);
+
+        std::vector<TaskID> deps2 = {t1};
+        TaskID t2 = t->runAsyncWithDeps(&stage2, num_tasks, deps2);
+
+        std::vector<TaskID> deps3 = {t2};
+        t->runAsyncWithDeps(&stage3, num_tasks, deps3);
+
+        t->sync();
+    } else {
+        t->run(&stage1, num_tasks);
+        t->run(&stage2, num_tasks);
+        t->run(&stage3, num_tasks);
+    }
+
+    double end = CycleTimer::currentSeconds();
+
+    // Validate correctness
+    TestResults res;
+    res.passed = true;
+    for (int i = 0; i < num_elements; i++) {
+        float expected = std::sin(std::sqrt(A[i] * 2.0f)) + std::cos(std::sqrt(A[i] * 2.0f));
+        if (std::fabs(D[i] - expected) > 1e-5f) {
+            printf("Mismatch at %d: got %.6f expected %.6f\n", i, D[i], expected);
+            res.passed = false;
             break;
         }
     }
-    results.time = end_time - start_time;
 
-    delete [] output;
+    res.time = end - start;
 
-    return results;
+    delete[] A;
+    delete[] B;
+    delete[] C;
+    delete[] D;
+
+    return res;
+}
+
+TestResults vectorPipelineDepsTestSync(ITaskSystem* t) {
+    return vectorPipelineDepsTest(t, false);
+}
+
+TestResults vectorPipelineDepsTestAsync(ITaskSystem* t) {
+    return vectorPipelineDepsTest(t, true);
 }
 
 /*
